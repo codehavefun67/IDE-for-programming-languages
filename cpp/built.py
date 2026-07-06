@@ -13,14 +13,11 @@ then you can use this module for building your own IDE.
 """
 
 import queue
-import sys as s
 import tkinter as tk
 import os
 import subprocess as sp
 import re
-import threading
 from tkinter import filedialog as fdl
-from tkinter import messagebox as msgb
 from tkinter import ttk as t
 from tkinter import scrolledtext as st
 _version_ = 1.0 
@@ -182,6 +179,7 @@ class file:
 class console_log(st.ScrolledText):
 
     def __init__(self, parent, width, height, **kwargs):
+        # Pass **kwargs through so any extra parameters don't break init
         super().__init__(
             parent,
             width=width,
@@ -189,18 +187,18 @@ class console_log(st.ScrolledText):
             bg="#1E1E1E",
             fg="#FFFFFF",
             insertbackground="white",
+            **kwargs,
         )
         self.config(font=("Consolas", 10))
 
         self.tag_config("stdout", foreground="#FFFFFF")
         self.tag_config("stderr", foreground="#FF5555")
-        self.tag_config("system", foreground="#00FF00")
+        self.tag_config("system", foreground="#0051FF")
 
-        # 📦 Safe queue for background threads to dump text data into
+        # Keeping the queue ONLY for capturing compiler warnings/errors safely
         self.console_queue = queue.Queue()
 
     def write(self, text, tag="stdout"):
-        """Always execute this method on the MAIN loop thread."""
         self.config(state=tk.NORMAL)
         self.insert(tk.END, text, tag)
         self.see(tk.END)
@@ -211,82 +209,34 @@ class console_log(st.ScrolledText):
         self.delete("1.0", tk.END)
         self.config(state=tk.DISABLED)
 
-    def handle(self, process):
-        """Starts the process background listeners safely."""
-        self.clr_scr()
-        self.write("⚡ Compiling and running code...\n", "system")
+class MainUI:
 
-        # Start up your independent background stream monitors
-        if process.stdout:
-            threading.Thread(
-                target=self._read_stream,
-                args=(process.stdout, "stdout"),
-                daemon=True,
-            ).start()
-        if process.stderr:
-            threading.Thread(
-                target=self._read_stream,
-                args=(process.stderr, "stderr"),
-                daemon=True,
-            ).start()
-
-        # 🔄 Launch Tkinter's continuous loop checker to consume the queue data safely
-        self._check_console_queue()
-
-    def _read_stream(self, stream, tag):
-        """BACKGROUND THREAD: Blindly reads lines and puts them into the safe queue."""
-        try:
-            # Iterating through readline handles text lines efficiently as they output
-            for line in iter(stream.readline, ""):
-                if line:
-                    self.console_queue.put((line, tag))
-            stream.close()
-        except Exception as e:
-            self.console_queue.put(
-                (f"\n❌ Stream parsing dropped: {str(e)}\n", "stderr")
-            )
-
-    def _check_console_queue(self):
-        """MAIN THREAD: Safely flushes the queue text data into your UI elements."""
-        try:
-            # Drain out everything waiting in the queue without blocking the UI
-            while True:
-                text_chunk, tag = self.console_queue.get_nowait()
-                self.write(text_chunk, tag)
-                self.console_queue.task_done()
-        except queue.Empty:
-            # No text lines left in queue for this frame loop
-            pass
-
-        # Schedule the loop to execute check again in 50 milliseconds
-        self.after(50, self._check_console_queue)
-
-class MainUI: 
     def __init__(self, root, width, height, **kwargs):
         self.root = root
         self.width = width
         self.height = height
-        
-        self.csw = self.width * 0.3
-        self.csh = self.height * 0.3
-        self.idw = self.width * 0.7
-        self.idh = self.height * 0.7
-        
-        self.ui_builder()
 
+        # Split window layouts dynamically
+        self.csw = self.width * 0.5
+        self.csh = self.height * 0.5
+        self.idw = self.width * 0.5
+        self.idh = self.height * 0.5
+
+        self.ui_builder()
     def ui_builder(self):
+        # 1. Toolbar layout (Fixed at the top)
         self.toolbar = tk.Frame(self.root, bg="#2D2D2D", height=40)
         self.toolbar.pack(fill=tk.X)
         
-        self.run_btn = tk.Button(
+        self.com_btn = tk.Button(
             self.toolbar, 
-            text="▶ Run Code", 
-            bg="#1E7E34", 
+            text="Compile", 
+            bg="#007acc", 
             fg="white", 
             font=("Consolas", 10, "bold"),
-            command=self.run
+            command=self.compile
         )
-        self.run_btn.pack(side=tk.LEFT, padx=15, pady=5)
+        self.com_btn.pack(side=tk.LEFT, padx=15, pady=5)
 
         self.save_file = tk.Button(
             self.toolbar, 
@@ -296,41 +246,179 @@ class MainUI:
             font=("Consolas", 10, "bold"),
             command=lambda: self.ide.save(),
         )
-        
         self.save_file.pack(side=tk.LEFT, padx=10, pady=5)
         
-        self.editor_frame = tk.Frame(self.root, width=int(self.idw), height=int(self.idh))
-        self.editor_frame.pack(expand=True, fill=tk.BOTH)
+        self.run_btn = tk.Button(
+            self.toolbar,
+            text="Run Compiled",
+            bg="#007acc",
+            fg="white",
+            font=("Consolas", 10, "bold"),
+            command=self.run
+        ) 
+        self.run_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        # 2. Create a PanedWindow splitting vertically (Top vs Bottom)
+        self.splitter = tk.PanedWindow(self.root, orient=tk.VERTICAL, sashwidth=6, bg="#444444")
+        self.splitter.pack(expand=True, fill=tk.BOTH)
+        
+        # 3. Editor Container Frame (Put inside the splitter)
+        self.editor_frame = tk.Frame(self.splitter, bg="#1E1E1E")
         self.ide = file(self.editor_frame)
         
-        self.console_frame = tk.Frame(self.root, width=int(self.csw), height=int(self.csh))
-        self.console_frame.pack(expand=True, fill=tk.BOTH)
-        self.console = console_log(self.console_frame, int(self.csw), int(self.csh))
+        # 4. Console Container Frame (Put inside the splitter)
+        self.console_frame = tk.Frame(self.splitter, bg="#1E1E1E")
+        # width/height here dictate text character layout grids
+        self.console = console_log(self.console_frame, width=80, height=10)
         self.console.pack(expand=True, fill=tk.BOTH)
+        
+        # 📦 5. Add both frames safely without the invalid "-weight" option
+        # minsize ensures neither panel can be squished completely to 0 pixels
+        self.splitter.add(self.editor_frame, minsize=200)  
+        self.splitter.add(self.console_frame, minsize=100)
+
+    def compile(self):
+        # 1. Trigger the text auto-saver
+        self.ide.auto_save()
+
+        current_dir = os.getcwd()
+        batch_file = os.path.join(current_dir, "compiler.bat")
+        compile_log_file = os.path.join(current_dir, "std_compile_out_err.txt")
+
+        # Fallback if your custom compiler script isn't found
+        if not os.path.exists(batch_file):
+            self.console.clr_scr()
+            self.console.write(
+                f"Error: 'compiler.bat' not found in {current_dir}\n",
+                "stderr",
+            )
+            return
+
+        self.console.clr_scr()
+        self.console.write(" Compiling code...\n", "system")
+
+        # 2. Reset and clear old compilation logs
+        try:
+            open(compile_log_file, "w").close()
+            self.compile_log_handle = open(compile_log_file, "w", encoding="utf-8")
+        except Exception as e:
+            self.console.write(f"❌ Failed to initialize log file: {str(e)}\n", "stderr")
+            return
+
+        # 3. Fire compiler.bat and dump streams straight into the log file
+        self.compilation_process = sp.Popen(
+            f'cmd /c "{batch_file}"',
+            shell=True,
+            stdout=self.compile_log_handle,
+            stderr=self.compile_log_handle,
+            cwd=current_dir,
+            creationflags=sp.CREATE_NO_WINDOW,  # Keeps it completely silent
+        )
+
+        # 4. Initialize tracking positions and start the non-blocking tail loop
+        self.compile_last_read_position = 0
+        self._tail_compile_log(compile_log_file)
+
+    def _tail_compile_log(self, log_file_path):
+        """Reads new compilation messages from the log file without freezing Tkinter."""
+        try:
+            if os.path.exists(log_file_path):
+                with open(log_file_path, "r", encoding="utf-8") as f:
+                    f.seek(self.compile_last_read_position)
+                    new_data = f.read()
+                    self.compile_last_read_position = f.tell()
+                
+                # If g++ outputs errors or warnings, print them out instantly
+                if new_data:
+                    self.console.write(new_data, "stdout")
+        except Exception as e:
+            print(f"Compilation log tailing error: {e}")
+
+        # Check if the compilation process is finished yet
+        if self.compilation_process.poll() is None:
+            # Still compiling! Poll again in 50ms without freezing the UI
+            self.root.after(50, lambda: self._tail_compile_log(log_file_path))
+        else:
+            # Compilation finished! Clean up the write handle safely
+            if hasattr(self, 'compile_log_handle') and not self.compile_log_handle.closed:
+                self.compile_log_handle.close()
+            
+            # Verify if compilation successfully built the binary
+            current_dir = os.getcwd()
+            exe_file = os.path.join(current_dir, "noname.exe")
+            if os.path.exists(exe_file) and os.path.getsize(exe_file) > 0:
+                self.console.write("Compilation finished successfully!\n", "system")
+            else:
+                self.console.write("Compilation failed. Check syntax errors above.\n", "stderr")
+        # 3. Wait safely on a small post-check to verify compilation output
 
     def run(self):
-        # Tự động lưu nội dung hiện tại vào file tạm noname.cpp trước khi chạy
-        self.ide.auto_save()
-        
-        # Lệnh biên dịch đồng thời thực thi nếu thành công (Dùng cho môi trường Windows)
-        # Biên dịch ra file noname.exe, nếu thành công (&&) thì chạy luôn file đó
-        cmd = "g++ noname.cpp -o noname.exe && noname.exe"
-        
-        process = sp.Popen(
-            cmd,
+        self.console.clr_scr()
+        self.console.write(" Running program...\n", "system")
+
+        current_dir = os.getcwd()
+        run_log_file = os.path.join(current_dir, "run_out_err.txt")
+
+        # 2. Reset and clear old runtime logs
+        try:
+            open(run_log_file, "w").close()
+            self.run_log_handle = open(run_log_file, "w", encoding="utf-8")
+        except Exception as e:
+            self.console.write(f"❌ Failed to initialize log file: {str(e)}\n", "stderr")
+            return
+
+        # 3. Fire noname.exe and dump streams straight into the runtime log file
+        self.running_process = sp.Popen(
+            ["noname.exe"],
             shell=True,
-            stdout=sp.PIPE,
-            stderr=sp.PIPE,
-            text=True,
-            creationflags=sp.CREATE_NEW_CONSOLE
+            stdout=self.run_log_handle,
+            stderr=self.run_log_handle,
+            cwd=current_dir,
+            creationflags=sp.CREATE_NO_WINDOW,  # Keeps it completely silent
         )
-        self.console.handle(process)
-        proc = sp.Popen(
-            "noname.exe",
-            shell=True,
-            stdout=sp.PIPE,
-            stderr=sp.PIPE,
-            text=True,  
-        )
-        self.console.handle(proc)
-    
+
+        # 4. Initialize tracking positions and start the non-blocking tail loop
+        self.run_last_read_position = 0
+        self._tail_run_log(run_log_file)
+
+    def _tail_run_log(self, log_file_path):
+        """Reads new runtime messages from the log file without freezing Tkinter."""
+        try:
+            if os.path.exists(log_file_path):
+                with open(log_file_path, "r", encoding="utf-8") as f:
+                    f.seek(self.run_last_read_position)
+                    new_data = f.read()
+                    self.run_last_read_position = f.tell()
+                
+                # If the program outputs data, print it instantly
+                if new_data:
+                    self.console.write(new_data, "stdout")
+        except Exception as e:
+            print(f"Runtime log tailing error: {e}")
+
+        # Check if the execution process is finished yet
+        exit_code = self.running_process.poll()
+
+        if exit_code is None:
+            # Still running! Poll again in 50ms without freezing the UI
+            self.root.after(50, lambda: self._tail_run_log(log_file_path))
+        else:
+            # Execution finished! Clean up the write handle safely
+            if hasattr(self, 'run_log_handle') and not self.run_log_handle.closed:
+                self.run_log_handle.close()
+            
+            # Final sweep to catch any last-second text flushes
+            try:
+                if os.path.exists(log_file_path):
+                    with open(log_file_path, "r", encoding="utf-8") as f:
+                        f.seek(self.run_last_read_position)
+                        final_data = f.read()
+                        if final_data:
+                            self.console.write(final_data, "stdout")
+            except Exception:
+                pass
+
+            # Print the final exit code status
+            if exit_code == 0:
+                self.console.write("\n🎉 Program is done with exit code 0\n", "system")
+            else:
+                self.console.write(f"\n❌ Program exited with code: {exit_code}\n", "stderr")
