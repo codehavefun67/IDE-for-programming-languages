@@ -40,7 +40,9 @@ class ide(st.ScrolledText):
         self.bind("<KeyRelease>", lambda event: self.catch_error_syntax())
 
     def catch_error_syntax(self, event=None):
-        
+        import re
+        import tkinter as tk
+
         # 1. Clear previous tags/errors across the text window
         for tag in ["keyword", "type", "string", "comment", "error", "include"]:
             self.tag_remove(tag, "1.0", tk.END)
@@ -111,7 +113,8 @@ class ide(st.ScrolledText):
                 continue  # Don't throw errors on the line the user is actively typing on
 
             if not clean_line.startswith(('#', '//', '/*', '*')):
-                if not clean_line.endswith((';', '{', '}', ',')) and not clean_line.startswith(('if', 'for', 'while', 'switch')):
+                # FIX: Added ':' to the endswith check to accept access specifiers & labels safely!
+                if not clean_line.endswith((';', '{', '}', ',', ':')) and not clean_line.startswith(('if', 'for', 'while', 'switch')):
                     stripped_line = line.rstrip()
                     if len(stripped_line) > 0:
                         end_idx = len(stripped_line)
@@ -193,7 +196,7 @@ class console_log(st.ScrolledText):
 
         self.tag_config("stdout", foreground="#FFFFFF")
         self.tag_config("stderr", foreground="#FF5555")
-        self.tag_config("system", foreground="#0051FF")
+        self.tag_config("system", foreground="#5DD40E")
 
         # Keeping the queue ONLY for capturing compiler warnings/errors safely
         self.console_queue = queue.Queue()
@@ -356,7 +359,7 @@ class MainUI:
         self.console.write(" Running program...\n", "system")
 
         current_dir = os.getcwd()
-        run_log_file = os.path.join(current_dir, "run_out_err.txt")
+        run_log_file = os.path.join(current_dir, "std_out_err.txt")
 
         # 2. Reset and clear old runtime logs
         try:
@@ -419,6 +422,6 @@ class MainUI:
 
             # Print the final exit code status
             if exit_code == 0:
-                self.console.write("\n🎉 Program is done with exit code 0\n", "system")
+                self.console.write("\nProgram is done with exit code 0\n", "system")
             else:
-                self.console.write(f"\n❌ Program exited with code: {exit_code}\n", "stderr")
+                self.console.write(f"\nProgram exited with code: {exit_code}\n", "stderr")
