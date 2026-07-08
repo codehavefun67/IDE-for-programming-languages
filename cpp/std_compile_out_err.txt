@@ -1,0 +1,6 @@
+
+'--' is not recognized as an internal or external command,
+operable program or batch file.
+[SYSTEM] G++ installed! Compiling noname.cpp...
+D:/msys64/ucrt64/bin/../lib/gcc/x86_64-w64-mingw32/16.1.0/../../../../x86_64-w64-mingw32/bin/ld.exe: cannot open output file noname.exe: Permission denied
+collect2.exe: error: ld returned 1 exit status
