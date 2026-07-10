@@ -6,325 +6,316 @@ delete the comments above.
 
 This is 1.0 version, if anyone have bugs or excepts, send via Discord: helofj_96789.
 
-If you want to use this module, you MUST install MinGW and sure it has g++.exe.
+If you want to use this module, you MUST install MinGW and sure it has gcc.exe / g++.exe.
 
-I will deploy another module for C IDE, if who need to learn programming C++ basic
-then you can use this module for building your own IDE.
+Another news: C ide has released!!!
 """
 
-import queue
-import tkinter as tk
 import os
+import re
+import queue
 import subprocess as sp
-from tkinter import filedialog as fdl
-from tkinter import ttk as t
-from tkinter import scrolledtext as st
-_version_ = 1.0
-vars()
-class ide(st.ScrolledText):
-    def __init__(self, root, width, height, state="normal", **kwargs):
-        super().__init__(root, wrap=tk.WORD, width=width, height=height, bg="#1E1E1E", fg="#FFFFFF", undo=True)
-        self.config(font=("Consolas", 10))
-        self.config(state=state)
-        self.root = root
-        self.new_file_name = "noname.cpp"
-        
-        # Configure tags for syntax highlighting and error pointing
-        self.tag_config("keyword", foreground="#0048A7", font=("Consolas", 10, "bold"))
-        self.tag_config("type", foreground="#0048a7", font=("Consolas", 10, "bold"))
-        self.tag_config("string", foreground="#CE9178")
-        self.tag_config("comment", foreground="#608B4E")
-        self.tag_config("include", foreground="#C586C0")
-        self.tag_config("error", background="#FFCCCC", foreground="#FF0000", underline=True)
-        self.tag_config("function", foreground="#FFF676")
-        self.tag_config("var", foreground="#63C9F8")
-        # Simple real-time trigger
-        self.bind("<KeyRelease>", lambda event: self.catch_error_syntax())
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+    QTabWidget, QTextEdit, QSplitter, QFileDialog
+)
+from PyQt5.QtGui import QFont, QTextCharFormat, QColor, QTextCursor, QSyntaxHighlighter
+from PyQt5.QtCore import Qt, QTimer
 
-    def catch_error_syntax(self, event=None):
-        import re
-        import tkinter as tk
+_version_ = 1.0 
 
-        # 1. Clear previous tags/errors across the text window
-        for tag in ["keyword", "type", "string", "comment", "error", "include", "function", "var"]:
-            self.tag_remove(tag, "1.0", tk.END)
-            
-        content = self.get("1.0", "end-1c")
-        lines = content.split('\n')
-        
-        keywords = r'\b(alignas|alignof|and|and_eq|asm|atomic_cancel|atomic_commit|atomic_noexcept|bitand|bitor|break|case|catch|class|co_await|co_return|co_yield|compl|concept|const_cast|continue|default|delete|do|dynamic_cast|else|enum|explicit|export|extern|final|for|friend|goto|if|import|inline|module|namespace|new|noexcept|not_eq|operator|or|or_eq|override|private|protected|public|reflexpr|register|reinterpret_cast|requires|return|sizeof|static|static_assert|static_cast|struct|switch|synchronized|template|this|thread_local|throw|transaction_safe|transaction_safe_dynamic|try|typedef|typeid|typename|union|using|virtual|while|xor|xor_eq)\b'
-        types = r'\b(bool|char|char8_t|char16_t|char32_t|double|float|int|long|short|signed|unsigned|void|wchar_t|auto|decltype|constexpr|consteval|constinit|const|volatile|mutable|nullptr|true|false)\b'
-        
-        try:
-            current_cursor_line = int(self.index("insert").split('.')[0])
-        except Exception:
-            current_cursor_line = -1
+class Cpp_SyntaxHighlighter(QSyntaxHighlighter):
+    """Safe, native PyQt5 syntax highlighter that handles C++ patterns safely."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.formats = {}
+        self.setup_formats()
 
-        for row, line in enumerate(lines, start=1):
-            clean_line = line.strip()
-            if not clean_line:
+    def setup_formats(self):
+        # Keyword Style
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#0048A7"))
+        fmt.setFontWeight(QFont.Bold)
+        self.formats["keyword"] = fmt
+        
+        # Type Style
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#0048a7"))
+        fmt.setFontWeight(QFont.Bold)
+        self.formats["type"] = fmt
+        
+        # String Style
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#CE9178"))
+        self.formats["string"] = fmt
+        
+        # Comment Style
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#608B4E"))
+        self.formats["comment"] = fmt
+        
+        # Include Style
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#C586C0"))
+        self.formats["include"] = fmt
+        
+        # Function Style
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#FFF676"))
+        self.formats["function"] = fmt
+        
+        # Variable Style
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#63C9F8"))
+        self.formats["var"] = fmt
+
+        # Error Style (Missing Semicolon / Bad Include)
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor("#FFCCCC"))
+        fmt.setForeground(QColor("#FF0000"))
+        fmt.setUnderlineStyle(QTextCharFormat.SingleUnderline)
+        self.formats["error"] = fmt
+
+    def highlightBlock(self, text):
+        clean_line = text.strip()
+        if not clean_line:
+            return
+
+        # 1. Handle Include Check (C++ Rules: Allow <iostream> without .h)
+        if clean_line.startswith("#include"):
+            include_match = re.search(r'#include\s*(<[a-zA-Z0-9_\+/\.]+>|"[a-zA-Z0-9_\+/\.]+(\.h|\.hpp)*")\s*$', text)
+            if include_match:
+                self.setFormat(0, len(text), self.formats["include"])
+            else:
+                self.setFormat(0, len(text), self.formats["error"])
+            return  
+
+        # 2. Comments
+        comment_match = re.search(r'//.*', text)
+        if comment_match:
+            self.setFormat(comment_match.start(), comment_match.end() - comment_match.start(), self.formats["comment"])
+            if clean_line.startswith("//"):
+                return
+
+        # 3. Track String Ranges to prevent keyword coloring within literal texts
+        string_ranges = []
+        for match in re.finditer(r'".*?"|\'.*?\'', text):
+            start = match.start()
+            length = match.end() - start
+            string_ranges.append((start, match.end()))
+            self.setFormat(start, length, self.formats["string"])
+
+        def is_inside_string(start_pos, end_pos):
+            for s_start, s_end in string_ranges:
+                if start_pos >= s_start and end_pos <= s_end:
+                    return True
+            return False
+
+        # C++ Keyword and Type Configurations
+        keywords = r'\b(auto|break|case|catch|class|const|constexpr|continue|default|delete|do|else|enum|explicit|export|extern|for|friend|goto|if|inline|mutable|namespace|new|noexcept|operator|private|protected|public|register|reinterpret_cast|return|sizeof|static|static_cast|struct|switch|template|this|throw|try|typedef|typename|union|using|virtual|volatile|while)\b'
+        types = r'\b(bool|char|char16_t|char32_t|double|float|int|long|short|signed|unsigned|void|wchar_t|string|vector|map|set|list)\b'
+
+        # Highlight Keywords
+        for match in re.finditer(keywords, text):
+            if not is_inside_string(match.start(), match.end()):
+                self.setFormat(match.start(), match.end() - match.start(), self.formats["keyword"])
+
+        # Highlight Types
+        for match in re.finditer(types, text):
+            if not is_inside_string(match.start(), match.end()):
+                self.setFormat(match.start(), match.end() - match.start(), self.formats["type"])
+
+        # Highlight Functions
+        for match in re.finditer(r'\b(?!(?:if|for|while|switch|return|catch)\b)[a-zA-Z_]\w*(?=\s*\()', text):
+            if not is_inside_string(match.start(), match.end()):
+                self.setFormat(match.start(), match.end() - match.start(), self.formats["function"])
+
+        # Highlight Variables
+        for type_match in re.finditer(types, text):
+            if is_inside_string(type_match.start(), type_match.end()):
                 continue
+            type_end = type_match.end()
+            remaining_line = text[type_end:]
+            var_match = re.match(r'^[\s\*&]+([a-zA-Z_]\w*)\b(?!\s*\()', remaining_line)
+            if var_match:
+                var_name = var_match.group(1)
+                var_start_col = type_end + remaining_line.find(var_name)
+                if not is_inside_string(var_start_col, var_start_col + len(var_name)):
+                    self.setFormat(var_start_col, len(var_name), self.formats["var"])
 
-            # ==========================================
-            # STEP 1: PREPROCESSOR DIRECTIVES & ACTIONS
-            # ==========================================
-            if clean_line.startswith("#include"):
-                # A. Run syntax highlighting for the include line
-                include_match = re.search(r'#include\s*(<[^>]*>|"[^"]*")?', line)
-                if include_match:
-                    self.tag_add("include", f"{row}.{include_match.start()}", f"{row}.{include_match.end()}")
-                continue  # Skip checking keywords/strings inside include lines
+        # 4. Semicolon Linting Check (Relaxed for C++)
+        if not clean_line.startswith(('', '//', '/*', '*', 'public:', 'private:', 'protected:')):
+            if not clean_line.endswith((';', '{', '}', ',', ':')) and not clean_line.startswith(('if', 'for', 'while', 'switch', 'class', 'namespace', 'try', 'catch')):
+                stripped_line = text.rstrip()
+                if len(stripped_line) > 0:
+                    end_idx = len(stripped_line)
+                    self.setFormat(end_idx - 1, 1, self.formats["error"])
 
-            # ==========================================
-            # STEP 2: COMMENTS (FULL LINE OR END-OF-LINE)
-            # ==========================================
-            comment_match = re.search(r'//.*', line)
-            if comment_match:
-                self.tag_add("comment", f"{row}.{comment_match.start()}", f"{row}.{comment_match.end()}")
-                # If the line starts with a comment, skip parsing entirely
-                if clean_line.startswith("//"):
-                    continue
 
-            # ==========================================
-            # STEP 3: STRINGS, KEYWORDS, FUNCTIONS, VARIABLES AND TYPES
-            # ==========================================
-            # A. Highlight literal strings
-            for match in re.finditer(r'".*?"|\'.*?\'', line):
-                self.tag_add("string", f"{row}.{match.start()}", f"{row}.{match.end()}")
-
-            # B. Highlight C++ control flow keywords
-            for match in re.finditer(keywords, line):
-                self.tag_add("keyword", f"{row}.{match.start()}", f"{row}.{match.end()}")
-
-            # C. Highlight native C++ data types
-            for match in re.finditer(types, line):
-                self.tag_add("type", f"{row}.{match.start()}", f"{row}.{match.end()}")
-
-            # D. Highlight Functions: Matches identifiers followed by '('
-            # Excludes structural keywords like if(, while(, switch(, catch(
-            for match in re.finditer(r'\b(?!(?:if|for|while|switch|catch|return)\b)[a-zA-Z_]\w*(?=\s*\()', line):
-                self.tag_add("function", f"{row}.{match.start()}", f"{row}.{match.end()}")
-
-            # E. Highlight Variables: Matches words immediately following an explicit type declaration
-            # Looks for words right after a registered data type keyword (handling spaces/pointers)
-            for type_match in re.finditer(types, line):
-                # Look ahead for a variable name after this type instance on the same line
-                type_end = type_match.end()
-                remaining_line = line[type_end:]
-                
-                # Capture the variable name immediately following the type, ignoring function signatures
-                var_match = re.match(r'^[\s\*&]+([a-zA-Z_]\w*)\b(?!\s*\()', remaining_line)
-                if var_match:
-                    var_name = var_match.group(1)
-                    # Calculate true starting column of the variable name string
-                    var_start_col = type_end + remaining_line.find(var_name)
-                    var_end_col = var_start_col + len(var_name)
-                    self.tag_add("var", f"{row}.{var_start_col}", f"{row}.{var_end_col}")
-
-            # ==========================================
-            # STEP 4: LINTING - MISSING SEMICOLONS
-            # ==========================================
-            if row == current_cursor_line:
-                continue  # Don't throw errors on the line the user is actively typing on
-
-            if not clean_line.startswith(('#', '//', '/*', '*')):
-                if not clean_line.endswith((';', '{', '}', ',', ':')) and not clean_line.startswith(('if', 'for', 'while', 'switch')):
-                    stripped_line = line.rstrip()
-                    if len(stripped_line) > 0:
-                        end_idx = len(stripped_line)
-                        self.tag_add("error", f"{row}.{end_idx - 1}", f"{row}.{end_idx}")
-    
-class file:
-    def __init__(self, root, **kwargs):
-        self.root = root
-        self.editors = {} # Lưu trữ dictionary để quản lý text riêng cho từng tab
+class ide(QTextEdit):
+    def __init__(self, parent=None, state="normal"):
+        super().__init__(parent)
+        self.setStyleSheet("background-color: #1E1E1E; color: #FFFFFF; selection-background-color: #3A3A3A;")
+        self.setFont(QFont("Consolas", 10))
         
-        self.notebook = t.Notebook(self.root)
-        self.notebook.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
+        if state == "disabled":
+            self.setReadOnly(True)
+            
+        self.new_file_name = "noname.cpp"
+        self.highlighter = Cpp_SyntaxHighlighter(self.document())
+
+
+class file(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.editors = {}
         
-        self.btn_frame = tk.Frame(self.root)
-        self.btn_frame.pack(pady=5)
-        self.new_tab = tk.Button(self.btn_frame, text="New File", command=self.add_editor)
-        self.new_tab.pack(side=tk.LEFT, padx=5, pady=5)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        self.notebook = QTabWidget(self)
+        layout.addWidget(self.notebook)
+        
+        btn_layout = QHBoxLayout()
+        self.new_tab = QPushButton("New File", self)
+        self.new_tab.clicked.connect(self.add_editor)
+        btn_layout.addWidget(self.new_tab)
          
-        self.save_btn = tk.Button(self.btn_frame, text="Save As (.cpp)", command=self.save)
-        self.save_btn.pack(side=tk.LEFT, padx=0, pady=5)
+        self.save_btn = QPushButton("Save As (.cpp)", self)
+        self.save_btn.clicked.connect(self.save)
+        btn_layout.addWidget(self.save_btn)
+        btn_layout.addStretch()
+        
+        layout.addLayout(btn_layout)
         self.add_editor()
 
     def add_editor(self):
-        frame = t.Frame(self.notebook)
-        editor = ide(frame, width=600, height=400)
-        editor.pack(expand=True, fill=tk.BOTH)
-        
-        tab_count = len(self.notebook.tabs()) + 1
+        editor = ide(self)
+        tab_count = self.notebook.count() + 1
         tab_id = f"Untitled-{tab_count}"
-        self.notebook.add(frame, text=tab_id)
-        self.notebook.select(frame)
         
-        # Lưu liên kết giữa frame của notebook và widget editor bên trong nó
-        self.editors[str(frame)] = editor
+        index = self.notebook.addTab(editor, tab_id)
+        self.notebook.setCurrentIndex(index)
+        self.editors[index] = editor
 
     def get_current_editor(self):
-        """Lấy chính xác widget editor của tab đang được chọn"""
-        try:
-            current_tab = self.notebook.select()
-            return self.editors[current_tab]
-        except Exception:
-            return None
+        current_index = self.notebook.currentIndex()
+        return self.editors.get(current_index, None)
 
     def read(self):
         editor = self.get_current_editor()
         if editor:
-            return editor.get("1.0", "end-1c")
+            return editor.toPlainText()
         return ""
 
-    def auto_save(self, src_name:str="noname.cpp"):
+    def auto_save(self, src_name: str = "noname.cpp"):
         content = self.read()
         with open(src_name, "w", encoding="utf-8") as f:
             f.write(content)
 
     def save(self):
-        name = fdl.asksaveasfilename(defaultextension=".cpp", filetypes=[("C++ files", "*.cpp"), ("All files", "*.*")])
+        name, _ = QFileDialog.getSaveFileName(self, "Save File", "", "C++ files (*.cpp);;All files (*.*)")
         if name:
             content = self.read()
             with open(name, "w", encoding="utf-8") as f:
                 f.write(content)
-            # Cập nhật lại tiêu đề Tab thành tên file vừa lưu
-            current_tab = self.notebook.select()
-            self.notebook.tab(current_tab, text=os.path.basename(name))
+            current_index = self.notebook.currentIndex()
+            self.notebook.setTabText(current_index, os.path.basename(name))
 
-class console_log(st.ScrolledText):
 
-    def __init__(self, parent, width, height, **kwargs):
-        # Pass **kwargs through so any extra parameters don't break init
-        super().__init__(
-            parent,
-            width=width,
-            height=height,
-            bg="#1E1E1E",
-            fg="#FFFFFF",
-            insertbackground="white",
-            **kwargs,
-        )
-        self.config(font=("Consolas", 10))
+class console_log(QTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("background-color: #1E1E1E; color: #FFFFFF; selection-background-color: #3A3A3A;")
+        self.setFont(QFont("Consolas", 10))
+        self.setReadOnly(True)
 
-        self.tag_config("stdout", foreground="#FFFFFF")
-        self.tag_config("stderr", foreground="#FF5555")
-        self.tag_config("system", foreground="#5DD40E")
-
-        # Keeping the queue ONLY for capturing compiler warnings/errors safely
+        self.formats = {
+            "stdout": QColor("#FFFFFF"),
+            "stderr": QColor("#FF5555"),
+            "system": QColor("#5DD40E")
+        }
         self.console_queue = queue.Queue()
 
     def write(self, text, tag="stdout"):
-        self.config(state=tk.NORMAL)
-        self.insert(tk.END, text, tag)
-        self.see(tk.END)
-        self.config(state=tk.DISABLED)
+        self.moveCursor(QTextCursor.End)
+        textColor = self.formats.get(tag, QColor("#FFFFFF"))
+        
+        fmt = QTextCharFormat()
+        fmt.setForeground(textColor)
+        self.setCurrentCharFormat(fmt)
+        
+        self.insertPlainText(text)
+        self.ensureCursorVisible()
 
     def clr_scr(self):
-        self.config(state=tk.NORMAL)
-        self.delete("1.0", tk.END)
-        self.config(state=tk.DISABLED)
+        self.clear()
 
-class MainUI:
-    """Construct a window with parent ROOT.
 
-    Parameters:
-        root: the TARGET master.
-
-        width: the width of the main window and main IDE code, console
-
-        height: the height of the main window and main IDE code, console
-
-        **kwargs: More keyword arguments.
-    """
-    
-    def __init__(self, root, width, height, **kwargs):
-        self.root = root
-        self.width = width
-        self.height = height
-
-        # Split window layouts dynamically
-        self.csw = self.width * 0.5
-        self.csh = self.height * 0.5
-        self.idw = self.width * 0.5
-        self.idh = self.height * 0.5
-
-        self.ui_builder()
-    def ui_builder(self):
-        # 1. Toolbar layout (Fixed at the top)
-        self.toolbar = tk.Frame(self.root, bg="#2D2D2D", height=40)
-        self.toolbar.pack(fill=tk.X)
+class MainUI(QWidget):
+    def __init__(self, width, height, parent=None):
+        super().__init__(parent)
+        self.resize(width, height)
         
-        self.com_btn = tk.Button(
-            self.toolbar, 
-            text="Compile", 
-            bg="#007acc", 
-            fg="white", 
-            font=("Consolas", 10, "bold"),
-            command=self.compile
-        )
-        self.com_btn.pack(side=tk.LEFT, padx=15, pady=5)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        self.save_file = tk.Button(
-            self.toolbar, 
-            text="Save File", 
-            bg="#007ACC", 
-            fg="white", 
-            font=("Consolas", 10, "bold"),
-            command=lambda: self.ide.save(),
-        )
-        self.save_file.pack(side=tk.LEFT, padx=10, pady=5)
+        toolbar_widget = QWidget(self)
+        toolbar_widget.setStyleSheet("background-color: #2D2D2D;")
+        toolbar_widget.setFixedHeight(40)
+        toolbar_layout = QHBoxLayout(toolbar_widget)
+        toolbar_layout.setContentsMargins(10, 0, 10, 0)
         
-        self.run_btn = tk.Button(
-            self.toolbar,
-            text="Run Compiled",
-            bg="#007acc",
-            fg="white",
-            font=("Consolas", 10, "bold"),
-            command=self.run
-        ) 
-        self.run_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        # 2. Create a PanedWindow splitting vertically (Top vs Bottom)
-        self.splitter = tk.PanedWindow(self.root, orient=tk.VERTICAL, sashwidth=6, bg="#444444")
-        self.splitter.pack(expand=True, fill=tk.BOTH)
+        btn_style = "background-color: #007acc; color: white; font-family: Consolas; font-size: 13px; font-weight: bold; border: none; padding: 5px 15px;"
         
-        # 3. Editor Container Frame (Put inside the splitter)
-        self.editor_frame = tk.Frame(self.splitter, bg="#1E1E1E")
-        self.ide = file(self.editor_frame)
+        self.com_btn = QPushButton("Compile", self)
+        self.com_btn.setStyleSheet(btn_style)
+        self.com_btn.clicked.connect(self.compile)
+        toolbar_layout.addWidget(self.com_btn)
+
+        self.save_file = QPushButton("Save File", self)
+        self.save_file.setStyleSheet(btn_style)
+        self.save_file.clicked.connect(lambda: self.ide.save())
+        toolbar_layout.addWidget(self.save_file)
         
-        # 4. Console Container Frame (Put inside the splitter)
-        self.console_frame = tk.Frame(self.splitter, bg="#1E1E1E")
-        # width/height here dictate text character layout grids
-        self.console = console_log(self.console_frame, width=80, height=10)
-        self.console.pack(expand=True, fill=tk.BOTH)
+        self.run_btn = QPushButton("Run Compiled", self)
+        self.run_btn.setStyleSheet(btn_style)
+        self.run_btn.clicked.connect(self.run)
+        toolbar_layout.addWidget(self.run_btn)
+        toolbar_layout.addStretch()
         
-        # 📦 5. Add both frames safely without the invalid "-weight" option
-        # minsize ensures neither panel can be squished completely to 0 pixels
-        self.splitter.add(self.editor_frame, minsize=200)  
-        self.splitter.add(self.console_frame, minsize=100)
+        main_layout.addWidget(toolbar_widget)
+
+        self.splitter = QSplitter(Qt.Vertical, self)
+        main_layout.addWidget(self.splitter)
+        
+        self.ide = file(self.splitter)
+        self.splitter.addWidget(self.ide)
+        
+        self.console = console_log(self.splitter)
+        self.splitter.addWidget(self.console)
+        
+        self.splitter.setSizes([int(height * 0.7), int(height * 0.3)])
+
+        self.compile_timer = QTimer(self)
+        self.run_timer = QTimer(self)
 
     def compile(self):
-        # 1. Trigger the text auto-saver
         self.ide.auto_save()
 
         current_dir = os.getcwd()
         batch_file = os.path.join(current_dir, "compiler.bat")
         compile_log_file = os.path.join(current_dir, "std_compile_out_err.txt")
 
-        # Fallback if your custom compiler script isn't found
         if not os.path.exists(batch_file):
             self.console.clr_scr()
-            self.console.write(
-                f"Error: 'compiler.bat' not found in {current_dir}\n",
-                "stderr",
-            )
+            self.console.write(f"Error: 'compiler.bat' not found in {current_dir}\n", "stderr")
             return
 
         self.console.clr_scr()
-        self.console.write(" Compiling code...\n", "system")
+        self.console.write(" Compiling C++ code...\n", "system")
 
-        # 2. Reset and clear old compilation logs
         try:
             open(compile_log_file, "w").close()
             self.compile_log_handle = open(compile_log_file, "w", encoding="utf-8")
@@ -332,121 +323,61 @@ class MainUI:
             self.console.write(f"❌ Failed to initialize log file: {str(e)}\n", "stderr")
             return
 
-        # 3. Fire compiler.bat and dump streams straight into the log file
         self.compilation_process = sp.Popen(
             f'cmd /c "{batch_file}"',
             shell=True,
             stdout=self.compile_log_handle,
             stderr=self.compile_log_handle,
             cwd=current_dir,
-            creationflags=sp.CREATE_NO_WINDOW,  # Keeps it completely silent
+            creationflags=sp.CREATE_NO_WINDOW,
         )
 
-        # 4. Initialize tracking positions and start the non-blocking tail loop
         self.compile_last_read_position = 0
-        self._tail_compile_log(compile_log_file)
+        self.compile_timer.timeout.connect(lambda: self._tail_compile_log(compile_log_file))
+        self.compile_timer.start(50)
 
     def _tail_compile_log(self, log_file_path):
-        """Reads new compilation messages from the log file without freezing Tkinter."""
         try:
             if os.path.exists(log_file_path):
                 with open(log_file_path, "r", encoding="utf-8") as f:
                     f.seek(self.compile_last_read_position)
                     new_data = f.read()
                     self.compile_last_read_position = f.tell()
-                
-                # If g++ outputs errors or warnings, print them out instantly
                 if new_data:
                     self.console.write(new_data, "stdout")
         except Exception as e:
             print(f"Compilation log tailing error: {e}")
 
-        # Check if the compilation process is finished yet
-        if self.compilation_process.poll() is None:
-            # Still compiling! Poll again in 50ms without freezing the UI
-            self.root.after(50, lambda: self._tail_compile_log(log_file_path))
-        else:
-            # Compilation finished! Clean up the write handle safely
+        if self.compilation_process.poll() is not None:
+            self.compile_timer.stop()
+            self.compile_timer.disconnect()
+            
             if hasattr(self, 'compile_log_handle') and not self.compile_log_handle.closed:
                 self.compile_log_handle.close()
             
-            # Verify if compilation successfully built the binary
             current_dir = os.getcwd()
             exe_file = os.path.join(current_dir, "noname.exe")
             if os.path.exists(exe_file) and os.path.getsize(exe_file) > 0:
                 self.console.write("Compilation finished successfully!\n", "system")
             else:
                 self.console.write("Compilation failed. Check syntax errors above.\n", "stderr")
-        # 3. Wait safely on a small post-check to verify compilation output
 
     def run(self):
         self.console.clr_scr()
-        self.console.write(" Running program...\n", "system")
-
+        self.console.write(" Running program inside external interactive terminal...\n", "system")
         current_dir = os.getcwd()
-        run_log_file = os.path.join(current_dir, "std_out_err.txt")
 
-        # 2. Reset and clear old runtime logs
-        try:
-            open(run_log_file, "w").close()
-            self.run_log_handle = open(run_log_file, "w", encoding="utf-8")
-        except Exception as e:
-            self.console.write(f"❌ Failed to initialize log file: {str(e)}\n", "stderr")
-            return
-
-        # 3. Fire noname.exe and dump streams straight into the runtime log file
         self.running_process = sp.Popen(
-            ["noname.exe"],
+            ["start", "cmd", "/K", "noname.exe"],
             shell=True,
-            stdout=self.run_log_handle,
-            stderr=self.run_log_handle,
             cwd=current_dir,
-            creationflags=sp.CREATE_NO_WINDOW,  # Keeps it completely silent
         )
+        self.run_timer.timeout.connect(self._check_process_finished)
+        self.run_timer.start(100)
 
-        # 4. Initialize tracking positions and start the non-blocking tail loop
-        self.run_last_read_position = 0
-        self._tail_run_log(run_log_file)
-
-    def _tail_run_log(self, log_file_path):
-        """Reads new runtime messages from the log file without freezing Tkinter."""
-        try:
-            if os.path.exists(log_file_path):
-                with open(log_file_path, "r", encoding="utf-8") as f:
-                    f.seek(self.run_last_read_position)
-                    new_data = f.read()
-                    self.run_last_read_position = f.tell()
-                
-                # If the program outputs data, print it instantly
-                if new_data:
-                    self.console.write(new_data, "stdout")
-        except Exception as e:
-            print(f"Runtime log tailing error: {e}")
-
-        # Check if the execution process is finished yet
+    def _check_process_finished(self):
         exit_code = self.running_process.poll()
-
-        if exit_code is None:
-            # Still running! Poll again in 50ms without freezing the UI
-            self.root.after(50, lambda: self._tail_run_log(log_file_path))
-        else:
-            # Execution finished! Clean up the write handle safely
-            if hasattr(self, 'run_log_handle') and not self.run_log_handle.closed:
-                self.run_log_handle.close()
-            
-            # Final sweep to catch any last-second text flushes
-            try:
-                if os.path.exists(log_file_path):
-                    with open(log_file_path, "r", encoding="utf-8") as f:
-                        f.seek(self.run_last_read_position)
-                        final_data = f.read()
-                        if final_data:
-                            self.console.write(final_data, "stdout")
-            except Exception:
-                pass
-
-            # Print the final exit code status
-            if exit_code == 0:
-                self.console.write("\nProgram is done with exit code 0\n", "system")
-            else:
-                self.console.write(f"\nProgram exited with code: {exit_code}\n", "stderr")
+        if exit_code is not None:
+            self.run_timer.stop()
+            self.run_timer.disconnect()
+            self.console.write(f"\nExternal execution finished.\n", "system")

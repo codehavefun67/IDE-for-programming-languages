@@ -1,8 +1,11 @@
-from built import *; from built import _version_
-from tkinter import Tk
+from built import *
+from built import _version_
 import sys as s
+import os
 from datetime import datetime
 import ctypes
+from PyQt5.QtWidgets import QApplication, QMainWindow
+
 lsit = [
   f"Running on {s.platform.title()}",
   f"Version: {_version_}",
@@ -18,11 +21,18 @@ if __name__ == "__main__":
             
             for i in lsit:
                 print(i)
-            root = Tk()
-            app = MainUI(root, 1920, 1080)
-            app.console.write("=======DONT WRITE TO THIS CONSOLE!========", "system") # Điều chỉnh độ phân giải phù hợp để hiển thị ban đầu
-            root.title("CArt")       
-            root.mainloop()
+                
+            app = QApplication(s.argv)
+            
+            window = QMainWindow()
+            main_ui = MainUI(1920, 1080)
+            window.setCentralWidget(main_ui)
+            window.setWindowTitle("C++Art")
+            
+            main_ui.console.write("=======DONT WRITE TO THIS CONSOLE!========", "system")
+            
+            window.show()
+            s.exit(app.exec_())
         
         except Exception as e:
             print("\n" + "="*50)
@@ -33,4 +43,5 @@ if __name__ == "__main__":
             print("="*50)
             input("\nPress ENTER to close this window...")
     else:
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", s.executable, "ide.py", None, 1)
+        # Ensures the elevated workspace stays fixed on your current working directory
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", s.executable, "ide.py", os.getcwd(), 1)
